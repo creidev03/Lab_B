@@ -38,7 +38,10 @@ jobs:
       - name: Copy files from Lab_A
         run: |
           # sync from the clone in runner temp to repository root (avoid nested lab_a conflicts)
-          rsync -a --delete "$RUNNER_TEMP/lab_a/" . --exclude .git
+          rsync -a --delete "$RUNNER_TEMP/lab_a/" . \
+            --exclude .git \
+            --exclude '.github/workflows/**' \
+            --exclude '.github/workflows'
 
       - name: Get changelog new lines for PR body
         id: changelog
