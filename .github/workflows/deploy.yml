@@ -28,6 +28,16 @@ jobs:
           mkdir -p "$RUNNER_TEMP/lab_a"
           git clone https://github.com/creidev03/Lab_A.git "$RUNNER_TEMP/lab_a"
 
+      - name: Debug — list Lab_A clone
+        if: always()
+        run: |
+          echo "Listing $RUNNER_TEMP/lab_a contents"
+          ls -la "$RUNNER_TEMP/lab_a" || true
+          echo "Files (recursive) from Lab_A clone:"
+          find "$RUNNER_TEMP/lab_a" -maxdepth 3 -type f -print || true
+          echo "Lab_A git HEAD:" 
+          git -C "$RUNNER_TEMP/lab_a" log -1 --pretty=format:'%h %an %s' || true
+
       - id: prepare-branch
         name: Prepare branch
         run: |
@@ -38,10 +48,11 @@ jobs:
       - name: Copy files from Lab_A
         run: |
           # sync from the clone in runner temp to repository root (avoid nested lab_a conflicts)
-          rsync -a --delete "$RUNNER_TEMP/lab_a/" . \
+          # run rsync in verbose mode and show stats so logs reveal which files were transferred/omitted
+          rsync -av --delete --stats "$RUNNER_TEMP/lab_a/" . \
             --exclude .git \
             --exclude '.github/workflows/**' \
-            --exclude '.github/workflows'
+            --exclude '.github/workflows' || true
 
       - name: Get changelog new lines for PR body
         id: changelog
@@ -66,6 +77,14 @@ jobs:
           # set output via GITHUB_OUTPUT (modern syntax)
           BODY=$(sed -e ':a;N;$!ba;s/"/\"/g' /tmp/new_changelog_lines.txt | head -c 3000)
           echo "body=${BODY}" >> $GITHUB_OUTPUT
+
+      - name: Debug — show git status & staged (pre-commit)
+        if: always()
+        run: |
+          echo "git status (before add):"
+          git status --porcelain || true
+          echo "git ls-files (tracked):"
+          git ls-files | head -n 200 || true
 
       - id: commit-and-push
         name: Commit & push if changes
