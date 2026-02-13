@@ -27,10 +27,12 @@ jobs:
         run: |
           git clone https://github.com/creidev03/Lab_A.git lab_a
 
-      - name: Prepare branch
+      - id: prepare-branch
+        name: Prepare branch
         run: |
           BRANCH="sync/from-lab-a-$(date +%Y%m%d%H%M)"
           git checkout -b "${BRANCH}"
+          echo "branch=${BRANCH}" >> $GITHUB_OUTPUT
       
       - name: Copy files from Lab_A
         run: |
@@ -56,9 +58,12 @@ jobs:
           else
             echo "" > /tmp/new_changelog_lines.txt
           fi
-          echo "::set-output name=body::$(sed -e ':a;N;$!ba;s/"/\\"/g' /tmp/new_changelog_lines.txt | head -c 3000)"
+          # set output via GITHUB_OUTPUT (modern syntax)
+          BODY=$(sed -e ':a;N;$!ba;s/"/\"/g' /tmp/new_changelog_lines.txt | head -c 3000)
+          echo "body=${BODY}" >> $GITHUB_OUTPUT
 
-      - name: Commit & push if changes
+      - id: commit-and-push
+        name: Commit & push if changes
         run: |
           if [ -n "$(git status --porcelain)" ]; then
             git add -A
@@ -82,5 +87,5 @@ jobs:
 
             ${{ steps.changelog.outputs.body }}
 
-          branch: ${{ github.head_ref }}
+          branch: ${{ steps.prepare-branch.outputs.branch }}
           base: main
