@@ -1,0 +1,86 @@
+name: Sync from Lab_A to Lab_B
+
+# Se ejecuta programado (UTC): Friday 05:50 -> 00:50 America/Bogota
+on:
+  schedule:
+    - cron: '50 5 * * 5'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-lab-a-to-lab-b
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout destination (Lab_B)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clone Lab_A (public repo)
+        run: |
+          git clone https://github.com/creidev03/Lab_A.git lab_a
+
+      - name: Prepare branch
+        run: |
+          BRANCH="sync/from-lab-a-$(date +%Y%m%d%H%M)"
+          git checkout -b "${BRANCH}"
+      
+      - name: Copy files from Lab_A
+        run: |
+          rsync -a --delete lab_a/ . --exclude .git
+
+      - name: Get changelog new lines for PR body
+        id: changelog
+        run: |
+          # save previous changelog from origin/main if exists
+          if git show origin/main:changelog > /tmp/old_changelog 2>/dev/null; then
+            true
+          else
+            echo "" > /tmp/old_changelog
+          fi
+          # compute added lines (if previous empty, take full file)
+          if [ -s lab_a/changelog ] ; then
+            if [ -s /tmp/old_changelog ]; then
+              git --no-pager diff --no-index --unified=0 /tmp/old_changelog lab_a/changelog \
+                | awk '/^\+[^+]/ {print substr($0,2)}' > /tmp/new_changelog_lines.txt || true
+            else
+              cat lab_a/changelog > /tmp/new_changelog_lines.txt
+            fi
+          else
+            echo "" > /tmp/new_changelog_lines.txt
+          fi
+          echo "::set-output name=body::$(sed -e ':a;N;$!ba;s/"/\\"/g' /tmp/new_changelog_lines.txt | head -c 3000)"
+
+      - name: Commit & push if changes
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git add -A
+            git commit -m "sync: update from creidev03/Lab_A main"
+            git push --set-upstream origin HEAD
+            echo "pushed=true" >> $GITHUB_OUTPUT
+          else
+            echo "No changes to sync."
+            echo "pushed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Pull Request (if there were commits)
+        if: steps.commit-and-push.outputs.pushed == 'true' || github.event_name == 'workflow_dispatch'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "sync: update from Lab_A main"
+          title: "Sync from creidev03/Lab_A — automatic"
+          body: |
+            Nuevos cambios detectados en `changelog` (extraído desde `Lab_A`):
+
+            ${{ steps.changelog.outputs.body }}
+
+          branch: ${{ github.head_ref }}
+          base: main
