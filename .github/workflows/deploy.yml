@@ -23,20 +23,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Clone Lab_A (public repo)
+      - name: Clone Lab_A (public repo) into runner temp
         run: |
-          git clone https://github.com/creidev03/Lab_A.git lab_a
+          mkdir -p "$RUNNER_TEMP/lab_a"
+          git clone https://github.com/creidev03/Lab_A.git "$RUNNER_TEMP/lab_a"
 
-      - id: prepare-branch
-        name: Prepare branch
+      - name: Prepare branch
         run: |
           BRANCH="sync/from-lab-a-$(date +%Y%m%d%H%M)"
           git checkout -b "${BRANCH}"
-          echo "branch=${BRANCH}" >> $GITHUB_OUTPUT
       
       - name: Copy files from Lab_A
         run: |
-          rsync -a --delete lab_a/ . --exclude .git
+          # sync from the clone in runner temp to repository root (avoid nested lab_a conflicts)
+          rsync -a --delete "$RUNNER_TEMP/lab_a/" . --exclude .git
 
       - name: Get changelog new lines for PR body
         id: changelog
@@ -48,22 +48,19 @@ jobs:
             echo "" > /tmp/old_changelog
           fi
           # compute added lines (if previous empty, take full file)
-          if [ -s lab_a/changelog ] ; then
+          if [ -s "$RUNNER_TEMP/lab_a/changelog" ] ; then
             if [ -s /tmp/old_changelog ]; then
-              git --no-pager diff --no-index --unified=0 /tmp/old_changelog lab_a/changelog \
+              git --no-pager diff --no-index --unified=0 /tmp/old_changelog "$RUNNER_TEMP/lab_a/changelog" \
                 | awk '/^\+[^+]/ {print substr($0,2)}' > /tmp/new_changelog_lines.txt || true
             else
-              cat lab_a/changelog > /tmp/new_changelog_lines.txt
+              cat "$RUNNER_TEMP/lab_a/changelog" > /tmp/new_changelog_lines.txt
             fi
           else
             echo "" > /tmp/new_changelog_lines.txt
           fi
-          # set output via GITHUB_OUTPUT (modern syntax)
-          BODY=$(sed -e ':a;N;$!ba;s/"/\"/g' /tmp/new_changelog_lines.txt | head -c 3000)
-          echo "body=${BODY}" >> $GITHUB_OUTPUT
+          echo "::set-output name=body::$(sed -e ':a;N;$!ba;s/"/\\"/g' /tmp/new_changelog_lines.txt | head -c 3000)"
 
-      - id: commit-and-push
-        name: Commit & push if changes
+      - name: Commit & push if changes
         run: |
           if [ -n "$(git status --porcelain)" ]; then
             git add -A
@@ -87,5 +84,5 @@ jobs:
 
             ${{ steps.changelog.outputs.body }}
 
-          branch: ${{ steps.prepare-branch.outputs.branch }}
+          branch: ${{ github.head_ref }}
           base: main
