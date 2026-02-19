@@ -2,7 +2,7 @@ name: Sync from Lab_A to Lab_B
 
 on:
   schedule:
-    - cron: '50 5 * * 5'
+    - cron: '50 5 * * 5' # Friday 05:50 UTC -> 00:50 America/Bogota
   workflow_dispatch: {}
 
 permissions:
@@ -12,74 +12,44 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    # Definimos la salida para que el nodo 'notification' sepa qué PR se creó
+    outputs:
+      pr_number: ${{ steps.cpr.outputs.pull-request-number }}
     steps:
       - name: Checkout destination (Lab_B)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Trae todo el historial para evitar conflictos de merge
+          fetch-depth: 0
 
       - name: Clone Lab_A (public repo)
         run: |
           mkdir -p "$RUNNER_TEMP/lab_a"
-          # Forzamos el clon de la rama main del Repo A
           git clone -b main --single-branch https://github.com/creidev03/Lab_A.git "$RUNNER_TEMP/lab_a"
 
       - name: Sync files with Rsync
         run: |
-          # El flag -i (itemize-changes) nos dirá exactamente qué archivos cambiaron en los logs
           rsync -avi --delete "$RUNNER_TEMP/lab_a/" . \
             --exclude .git \
             --exclude '.github/workflows/**' \
             --exclude '.github/workflows'
 
-      - name: Check for changes (Debug)
-        run: |
-          echo "=== Archivos modificados detectados por Git ==="
-          git status --porcelain
-          if [ -z "$(git status --porcelain)" ]; then
-            echo "No se detectaron cambios reales entre los repositorios."
-          fi
-
       - name: Get changelog diff
         id: changelog
         run: |
-         # 1. Definimos el nombre correcto del archivo
           FILENAME="changelog.md"
-          
-          # 2. Intentamos obtener la versión previa desde el main del Repo B
           if git show origin/main:$FILENAME > /tmp/old_changelog 2>/dev/null; then
-            echo "Comparando contra versión previa de $FILENAME"
+            git --no-pager diff --no-index --unified=0 /tmp/old_changelog "$RUNNER_TEMP/lab_a/$FILENAME" \
+            | awk '/^\+[^+]/ {print substr($0,2)}' > /tmp/new_changelog_lines.txt || true
           else
-            echo "" > /tmp/old_changelog
-            echo "No se encontró versión previa de $FILENAME en origin/main"
+            cat "$RUNNER_TEMP/lab_a/$FILENAME" > /tmp/new_changelog_lines.txt 2>/dev/null || echo "Sin cambios" > /tmp/new_changelog_lines.txt
           fi
           
-          # 3. Verificamos si el archivo existe en el clon del Repo A
-          NEW_FILE="$RUNNER_TEMP/lab_a/$FILENAME"
-          
-          if [ -f "$NEW_FILE" ]; then
-            # Si el archivo viejo estaba vacío, tomamos las primeras 20 líneas del nuevo
-            if [ ! -s /tmp/old_changelog ]; then
-              head -n 20 "$NEW_FILE" > /tmp/new_changelog_lines.txt
-            else
-              # Sacamos solo las líneas que empiezan por + (los cambios nuevos)
-              git --no-pager diff --no-index --unified=0 /tmp/old_changelog "$NEW_FILE" \
-              | awk '/^\+[^+]/ {print substr($0,2)}' > /tmp/new_changelog_lines.txt || true
-            fi
-          else
-            echo "El archivo $FILENAME no existe en Lab_A" > /tmp/new_changelog_lines.txt
-          fi
-          
-          # 4. Enviamos al output de GitHub de forma segura
           echo "body<<EOF" >> $GITHUB_OUTPUT
-          if [ -s /tmp/new_changelog_lines.txt ]; then
-            cat /tmp/new_changelog_lines.txt >> $GITHUB_OUTPUT
-          else
-            echo "Sin cambios detectados en el contenido del archivo." >> $GITHUB_OUTPUT
-          fi
+          head -c 3000 /tmp/new_changelog_lines.txt >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create Pull Request
+        id: cpr
         uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -91,6 +61,39 @@ jobs:
             **Detalles del changelog:**
             ${{ steps.changelog.outputs.body }}
           branch: sync/update-from-lab-a
-          # Importante: delete-branch borra la rama temporal después del merge para que no estorbe
           delete-branch: true 
           base: main
+
+  notification:
+    needs: sync
+    # Este nodo solo corre si realmente se creó una Pull Request
+    if: needs.sync.outputs.pr_number != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get current date
+        id: date
+        run: echo "today=$(date +'%Y-%m-%d %H:%M')" >> $GITHUB_OUTPUT
+
+      - name: Send notification email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: carlosreina2100@gmail.com
+          # Recuerda configurar este Secret en GitHub (EMAIL_PASSWORD)
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "[AUTOMATIZADO] Nueva PR de sincronización - ${{ steps.date.outputs.today }}"
+          to: creidev03@gmail.com
+          from: GitHub Automation <carlosreina2100@gmail.com>
+          body: |
+            Hola,
+            
+            Se ha generado una nueva Pull Request automatizada para sincronizar Lab_A con Lab_B.
+            
+            Detalles:
+            - Fecha: ${{ steps.date.outputs.today }}
+            - Estado: Automatizado mediante GitHub Actions.
+            - Número de PR: #${{ needs.sync.outputs.pr_number }}
+            - Enlace: ${{ github.server_url }}/${{ github.repository }}/pull/${{ needs.sync.outputs.pr_number }}
+            
+            Por favor, revisa los cambios y realiza el merge si todo es correcto.
