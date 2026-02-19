@@ -28,27 +28,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/lab_a"
           git clone https://github.com/creidev03/Lab_A.git "$RUNNER_TEMP/lab_a"
 
-      - name: Debug — list Lab_A clone
-        if: always()
-        run: |
-          echo "Listing $RUNNER_TEMP/lab_a contents"
-          ls -la "$RUNNER_TEMP/lab_a" || true
-          echo "Files (recursive) from Lab_A clone:"
-          find "$RUNNER_TEMP/lab_a" -maxdepth 3 -type f -print || true
-          echo "Lab_A git HEAD:" 
-          git -C "$RUNNER_TEMP/lab_a" log -1 --pretty=format:'%h %an %s' || true
-
-      - id: prepare-branch
-        name: Prepare branch
-        run: |
-          BRANCH="sync/from-lab-a-$(date +%Y%m%d%H%M)"
-          git checkout -b "${BRANCH}"
-          echo "branch=${BRANCH}" >> $GITHUB_OUTPUT
-      
       - name: Copy files from Lab_A
         run: |
-          # sync from the clone in runner temp to repository root (avoid nested lab_a conflicts)
-          # run rsync in verbose mode and show stats so logs reveal which files were transferred/omitted
+          # Sincroniza los archivos al directorio actual de trabajo
           rsync -av --delete --stats "$RUNNER_TEMP/lab_a/" . \
             --exclude .git \
             --exclude '.github/workflows/**' \
@@ -57,13 +39,12 @@ jobs:
       - name: Get changelog new lines for PR body
         id: changelog
         run: |
-          # save previous changelog from origin/main if exists
           if git show origin/main:changelog > /tmp/old_changelog 2>/dev/null; then
             true
           else
             echo "" > /tmp/old_changelog
           fi
-          # compute added lines (if previous empty, take full file)
+          
           if [ -s "$RUNNER_TEMP/lab_a/changelog" ] ; then
             if [ -s /tmp/old_changelog ]; then
               git --no-pager diff --no-index --unified=0 /tmp/old_changelog "$RUNNER_TEMP/lab_a/changelog" \
@@ -74,37 +55,13 @@ jobs:
           else
             echo "" > /tmp/new_changelog_lines.txt
           fi
-          # set output via GITHUB_OUTPUT (modern syntax)
-          BODY=$(sed -e ':a;N;$!ba;s/"/\"/g' /tmp/new_changelog_lines.txt | head -c 3000)
-          echo "body=${BODY}" >> $GITHUB_OUTPUT
+          
+          # Corrección: Sintaxis multilínea requerida para GITHUB_OUTPUT
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          head -c 3000 /tmp/new_changelog_lines.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Debug — show git status & staged (pre-commit)
-        if: always()
-        run: |
-          echo "git status (before add):"
-          git status --porcelain || true
-          echo "git ls-files (tracked):"
-          git ls-files | head -n 200 || true
-
-      - id: commit-and-push
-        name: Commit & push if changes
-        run: |
-          # configure git identity for runner (local only)
-          git config user.name "github-actions[bot]" || true
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com" || true
-
-          if [ -n "$(git status --porcelain)" ]; then
-            git add -A
-            git commit -m "sync: update from creidev03/Lab_A main"
-            git push --set-upstream origin HEAD
-            echo "pushed=true" >> $GITHUB_OUTPUT
-          else
-            echo "No changes to sync."
-            echo "pushed=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Create Pull Request (if there were commits)
-        if: steps.commit-and-push.outputs.pushed == 'true' || github.event_name == 'workflow_dispatch'
+      - name: Create Pull Request
         uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -114,6 +71,7 @@ jobs:
             Nuevos cambios detectados en `changelog` (extraído desde `Lab_A`):
 
             ${{ steps.changelog.outputs.body }}
-
-          branch: ${{ steps.prepare-branch.outputs.branch }}
+          # La action maneja la creación de la rama automáticamente
+          branch: sync/from-lab-a
+          branch-suffix: timestamp 
           base: main
