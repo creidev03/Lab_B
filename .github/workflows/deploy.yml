@@ -43,16 +43,40 @@ jobs:
       - name: Get changelog diff
         id: changelog
         run: |
-          # Intentar sacar el diff del changelog para el cuerpo de la PR
-          if git show origin/main:changelog > /tmp/old_changelog 2>/dev/null; then
-            git --no-pager diff --no-index --unified=0 /tmp/old_changelog "$RUNNER_TEMP/lab_a/changelog" \
-            | awk '/^\+[^+]/ {print substr($0,2)}' > /tmp/new_changelog_lines.txt || true
+         # 1. Definimos el nombre correcto del archivo
+          FILENAME="changelog.md"
+          
+          # 2. Intentamos obtener la versión previa desde el main del Repo B
+          if git show origin/main:$FILENAME > /tmp/old_changelog 2>/dev/null; then
+            echo "Comparando contra versión previa de $FILENAME"
           else
-            cat "$RUNNER_TEMP/lab_a/changelog" > /tmp/new_changelog_lines.txt 2>/dev/null || echo "Sin cambios" > /tmp/new_changelog_lines.txt
+            echo "" > /tmp/old_changelog
+            echo "No se encontró versión previa de $FILENAME en origin/main"
           fi
           
+          # 3. Verificamos si el archivo existe en el clon del Repo A
+          NEW_FILE="$RUNNER_TEMP/lab_a/$FILENAME"
+          
+          if [ -f "$NEW_FILE" ]; then
+            # Si el archivo viejo estaba vacío, tomamos las primeras 20 líneas del nuevo
+            if [ ! -s /tmp/old_changelog ]; then
+              head -n 20 "$NEW_FILE" > /tmp/new_changelog_lines.txt
+            else
+              # Sacamos solo las líneas que empiezan por + (los cambios nuevos)
+              git --no-pager diff --no-index --unified=0 /tmp/old_changelog "$NEW_FILE" \
+              | awk '/^\+[^+]/ {print substr($0,2)}' > /tmp/new_changelog_lines.txt || true
+            fi
+          else
+            echo "El archivo $FILENAME no existe en Lab_A" > /tmp/new_changelog_lines.txt
+          fi
+          
+          # 4. Enviamos al output de GitHub de forma segura
           echo "body<<EOF" >> $GITHUB_OUTPUT
-          head -c 3000 /tmp/new_changelog_lines.txt >> $GITHUB_OUTPUT
+          if [ -s /tmp/new_changelog_lines.txt ]; then
+            cat /tmp/new_changelog_lines.txt >> $GITHUB_OUTPUT
+          else
+            echo "Sin cambios detectados en el contenido del archivo." >> $GITHUB_OUTPUT
+          fi
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create Pull Request
