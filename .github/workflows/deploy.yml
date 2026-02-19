@@ -1,6 +1,5 @@
 name: Sync from Lab_A to Lab_B
 
-# Se ejecuta programado (UTC): Friday 05:50 -> 00:50 America/Bogota
 on:
   schedule:
     - cron: '50 5 * * 5'
@@ -10,10 +9,6 @@ permissions:
   contents: write
   pull-requests: write
 
-concurrency:
-  group: sync-lab-a-to-lab-b
-  cancel-in-progress: true
-
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -21,42 +16,41 @@ jobs:
       - name: Checkout destination (Lab_B)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # Trae todo el historial para evitar conflictos de merge
 
-      - name: Clone Lab_A (public repo) into runner temp
+      - name: Clone Lab_A (public repo)
         run: |
           mkdir -p "$RUNNER_TEMP/lab_a"
-          git clone https://github.com/creidev03/Lab_A.git "$RUNNER_TEMP/lab_a"
+          # Forzamos el clon de la rama main del Repo A
+          git clone -b main --single-branch https://github.com/creidev03/Lab_A.git "$RUNNER_TEMP/lab_a"
 
-      - name: Copy files from Lab_A
+      - name: Sync files with Rsync
         run: |
-          # Sincroniza los archivos al directorio actual de trabajo
-          rsync -av --delete --stats "$RUNNER_TEMP/lab_a/" . \
+          # El flag -i (itemize-changes) nos dirá exactamente qué archivos cambiaron en los logs
+          rsync -avi --delete "$RUNNER_TEMP/lab_a/" . \
             --exclude .git \
             --exclude '.github/workflows/**' \
-            --exclude '.github/workflows' || true
+            --exclude '.github/workflows'
 
-      - name: Get changelog new lines for PR body
+      - name: Check for changes (Debug)
+        run: |
+          echo "=== Archivos modificados detectados por Git ==="
+          git status --porcelain
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No se detectaron cambios reales entre los repositorios."
+          fi
+
+      - name: Get changelog diff
         id: changelog
         run: |
+          # Intentar sacar el diff del changelog para el cuerpo de la PR
           if git show origin/main:changelog > /tmp/old_changelog 2>/dev/null; then
-            true
+            git --no-pager diff --no-index --unified=0 /tmp/old_changelog "$RUNNER_TEMP/lab_a/changelog" \
+            | awk '/^\+[^+]/ {print substr($0,2)}' > /tmp/new_changelog_lines.txt || true
           else
-            echo "" > /tmp/old_changelog
+            cat "$RUNNER_TEMP/lab_a/changelog" > /tmp/new_changelog_lines.txt 2>/dev/null || echo "Sin cambios" > /tmp/new_changelog_lines.txt
           fi
           
-          if [ -s "$RUNNER_TEMP/lab_a/changelog" ] ; then
-            if [ -s /tmp/old_changelog ]; then
-              git --no-pager diff --no-index --unified=0 /tmp/old_changelog "$RUNNER_TEMP/lab_a/changelog" \
-                | awk '/^\+[^+]/ {print substr($0,2)}' > /tmp/new_changelog_lines.txt || true
-            else
-              cat "$RUNNER_TEMP/lab_a/changelog" > /tmp/new_changelog_lines.txt
-            fi
-          else
-            echo "" > /tmp/new_changelog_lines.txt
-          fi
-          
-          # Corrección: Sintaxis multilínea requerida para GITHUB_OUTPUT
           echo "body<<EOF" >> $GITHUB_OUTPUT
           head -c 3000 /tmp/new_changelog_lines.txt >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -66,12 +60,13 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "sync: update from Lab_A main"
-          title: "Sync from creidev03/Lab_A — automatic"
+          title: "Sync from Lab_A — Nuevos cambios detectados"
           body: |
-            Nuevos cambios detectados en `changelog` (extraído desde `Lab_A`):
-
+            Se han encontrado cambios en `Lab_A`.
+            
+            **Detalles del changelog:**
             ${{ steps.changelog.outputs.body }}
-          # La action maneja la creación de la rama automáticamente
-          branch: sync/from-lab-a
-          branch-suffix: timestamp 
+          branch: sync/update-from-lab-a
+          # Importante: delete-branch borra la rama temporal después del merge para que no estorbe
+          delete-branch: true 
           base: main
