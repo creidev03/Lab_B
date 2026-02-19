@@ -3,6 +3,8 @@
 ## Unreleased
 - asfafasfasfasas
 ## Released
+### version 0.0.5
+- correo automatizado
 ### version 0.0.4
 - fasfafasfasfas
 ### version 0.0.3
