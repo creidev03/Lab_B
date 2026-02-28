@@ -1,0 +1,12 @@
+{
+	"titulo": "Texto de ejemplo",
+	"descripcion": "Este es un texto generado en formato JSON.",
+	"items": [
+		{ "id": 1, "valor": "Primero" },
+		{ "id": 2, "valor": "Segundo" },
+		{ "id": 3, "valor": "Tercero" }
+	],
+	"activo": true,
+	"contador": 3,
+	"fecha": "2026-02-28"
+}
