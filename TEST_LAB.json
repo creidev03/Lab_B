@@ -8,5 +8,18 @@
 	],
 	"activo": true,
 	"contador": 3,
-	"fecha": "2026-02-28"
+	"fecha": "2026-02-28",
+    "configuracion": {
+        "opcion1": "Valor de opción 1",
+        "opcion2": "Valor de opción 2"
+    },
+    "usuarios": [
+        { "nombre": "Usuario1", "edad": 30 },
+        { "nombre": "Usuario2", "edad": 25 }
+    ],
+    "notas": null,
+    "metadatos": {
+        "autor": "ChatGPT",
+        "version": "1.0"
+    }
 }
